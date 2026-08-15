@@ -1,0 +1,2 @@
+rc SleepBlockTool.rc
+cl SleepBlockTool.cpp SleepBlockTool.res user32.lib kernel32.lib shell32.lib advapi32.lib gdi32.lib

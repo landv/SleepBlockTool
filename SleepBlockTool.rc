@@ -1,0 +1,3 @@
+// SleepBlockTool.rc
+1001 ICON "icon.ico"
+1 24 "app.manifest"
