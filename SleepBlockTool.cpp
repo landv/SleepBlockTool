@@ -21,6 +21,7 @@
 #include <vector>
 #include <string>
 #include <cstdio>
+#include <cwctype>
 
 // 按钮控件ID 2000以上，避免和rc图标1001冲突
 #define ID_BTN_QUERY        2001
@@ -37,6 +38,10 @@ HWND hListProc;
 HICON g_hIcon = nullptr;
 HFONT g_hFont = nullptr; //全局美化字体
 HFONT g_hBtnFont = nullptr; //按钮专用字体（更大一号）
+
+// wmic 可用性检测缓存（wmic 在某些系统上默认未安装/被移除，只需检测一次）
+bool g_wmicChecked = false;
+bool g_wmicAvailable = false;
 
 //-----------------------------------------------------------------------------
 // RequireAdmin - 检查并以管理员权限重新启动
@@ -171,6 +176,24 @@ DWORD WINAPI CmdThread(LPVOID lpParam)
     delete p;
     PostMessageW(hWndMain, WM_CMD_DONE, 0, (LPARAM)r); // 通知主线程
     return 0;
+}
+
+//-----------------------------------------------------------------------------
+// IsWmicAvailable - 检测 wmic 命令是否可用
+//   通过 `where wmic` 查找 wmic.exe；若输出中包含 wmic.exe 则视为可用。
+//   结果缓存到全局变量，整个程序运行期间只检测一次。
+//-----------------------------------------------------------------------------
+bool IsWmicAvailable()
+{
+    if (g_wmicChecked) return g_wmicAvailable;
+    g_wmicChecked = true;
+
+    std::wstring r = ExecCmd(L"where wmic");
+    // 统一转小写后再查找，避免大小写差异（where 输出可能是 WMIC.EXE）
+    for (auto& c : r)
+        c = (wchar_t)towlower(c);
+    g_wmicAvailable = (r.find(L"wmic.exe") != std::wstring::npos);
+    return g_wmicAvailable;
 }
 
 //当前时间字符串
@@ -389,13 +412,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 break;
             }
 
-            // 构造结束进程的命令，后台执行（结果会显示在日志区）
+            // 构造结束进程的命令：优先 wmic，检测不可用时回退 taskkill
+            bool useWmic = IsWmicAvailable();
             wchar_t cmd[512];
-            swprintf_s(cmd, L"wmic process where name=\"%s\" call terminate", exeName.c_str());
+            if (useWmic)
+                swprintf_s(cmd, L"wmic process where name=\"%s\" call terminate", exeName.c_str());
+            else
+                swprintf_s(cmd, L"taskkill /IM %s /F", exeName.c_str());
 
             ThreadParam* p = new ThreadParam();
             p->cmd = cmd;
-            p->desc = L"结束进程 " + exeName;
+            p->desc = L"结束进程 " + exeName + (useWmic ? L"（wmic）" : L"（taskkill）");
             CreateThread(NULL, 0, CmdThread, p, 0, NULL);
         }
         //【清空】按钮：清空日志显示区
